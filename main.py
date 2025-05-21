@@ -5,6 +5,7 @@ from transformers import CLIPProcessor, CLIPModel
 from PIL import Image
 import torch
 import streamlit as st
+from torchvision import transforms
 
 # --- Load CLIP model and processor with caching ---
 @st.cache_resource
@@ -118,19 +119,14 @@ else:
     """
     st.markdown(light_theme, unsafe_allow_html=True)
 
-# --- Similarity function ---
-def compute_similarity(image_path, ref_embedding):
-    try:
-        img = Image.open(image_path).convert("RGB")
-        inputs = processor(images=img, return_tensors="pt").to(device)
-        with torch.no_grad():
-            embedding = model.get_image_features(**inputs)
-        embedding = torch.nn.functional.normalize(embedding, p=2, dim=1)
-        similarity = (ref_embedding @ embedding.T).item()
-        return similarity
-    except Exception as e:
-        st.error(f"Error with {image_path}: {e}")
-        return None
+# --- Preprocessing for Batch ---
+preprocess = transforms.Compose([
+    transforms.Resize(224),
+    transforms.CenterCrop(224),
+    transforms.ToTensor(),
+    transforms.Normalize((0.48145466, 0.4578275, 0.40821073),
+                         (0.26862954, 0.26130258, 0.27577711))
+])
 
 # --- Streamlit UI ---
 st.title("🔍 CLIP-Based Photo Similarity Finder")
@@ -145,7 +141,7 @@ if reference_image and comparison_folder:
     if not os.path.isdir(comparison_folder):
         st.error("❌ The specified comparison folder path is invalid or does not exist.")
     else:
-        # Load reference image and get embedding
+        # Load reference image and compute embedding
         ref_img = Image.open(reference_image).convert("RGB")
         st.image(ref_img, caption="Reference Image", use_container_width=True)
 
@@ -154,7 +150,7 @@ if reference_image and comparison_folder:
             ref_embedding = model.get_image_features(**ref_inputs)
         ref_embedding = torch.nn.functional.normalize(ref_embedding, p=2, dim=1)
 
-        # Get list of images
+        # Gather image paths
         image_paths = [os.path.join(comparison_folder, f)
                        for f in os.listdir(comparison_folder)
                        if f.lower().endswith(('.jpg', '.jpeg', '.png', '.bmp'))]
@@ -163,41 +159,50 @@ if reference_image and comparison_folder:
             st.warning("⚠️ No images found in the specified folder.")
         else:
             st.markdown("### 🖼️ Top Matches")
-            results = []
 
-            # Progress UI
+            image_tensors = []
+            valid_paths = []
+
+            # Progress tracking
             progress_bar = st.progress(0)
             status_text = st.empty()
-
             start_time = time.time()
             total_images = len(image_paths)
 
-            for idx, filepath in enumerate(image_paths):
-                sim = compute_similarity(filepath, ref_embedding)
-                if sim is not None:
-                    results.append((filepath, sim))
+            for idx, path in enumerate(image_paths):
+                try:
+                    img = Image.open(path).convert("RGB")
+                    image_tensors.append(preprocess(img))
+                    valid_paths.append(path)
+                except Exception as e:
+                    st.error(f"Error loading {path}: {e}")
 
-                # Update progress
+                # Progress update
                 progress_percent = (idx + 1) / total_images
                 progress_bar.progress(progress_percent)
-
-                # Update estimated time left
                 elapsed = time.time() - start_time
                 if idx > 0:
-                    avg_time_per_image = elapsed / (idx + 1)
-                    estimated_remaining = avg_time_per_image * (total_images - idx - 1)
+                    avg_time = elapsed / (idx + 1)
+                    eta = avg_time * (total_images - idx - 1)
+                    status_text.text(f"Progress: {progress_percent:.0%} | Estimated time left: {int(eta//60)}m {int(eta%60)}s")
 
-                    minutes = math.floor(estimated_remaining / 60)
-                    seconds = int(estimated_remaining % 60)
-                    status_text.text(f"Progress: {progress_percent:.0%} | Estimated time left: {minutes}m {seconds}s")
+            if len(image_tensors) == 0:
+                st.warning("⚠️ No valid images could be loaded.")
+            else:
+                # Stack and move to device
+                batch_tensor = torch.stack(image_tensors).to(device)
 
-            # Sort results and display top matches
-            results.sort(key=lambda x: x[1], reverse=True)
-            top_results = results[:top_k]
+                with torch.no_grad():
+                    image_embeddings = model.get_image_features(pixel_values=batch_tensor)
+                image_embeddings = torch.nn.functional.normalize(image_embeddings, p=2, dim=1)
 
-            for img_path, score in top_results:
-                img = Image.open(img_path)
-                st.image(img, caption=f"{os.path.basename(img_path)} (Similarity: {score:.2f})", use_container_width=True)
+                # Compute similarity in batch
+                similarities = (ref_embedding @ image_embeddings.T).squeeze()
+                results = list(zip(valid_paths, similarities.tolist()))
 
+                # Show top results
+                results.sort(key=lambda x: x[1], reverse=True)
+                for img_path, score in results[:top_k]:
+                    st.image(Image.open(img_path), caption=f"{os.path.basename(img_path)} (Similarity: {score:.2f})", use_container_width=True)
 else:
     st.info("📥 Please upload a reference image and provide a valid folder path.")
