@@ -32,11 +32,15 @@ if theme == ":red[Dark]":
         color: white;
         transition: background-color 0.5s ease, color 0.5s ease;
     }
-    /* Change widgets (buttons, sliders, etc.) */
+
+    /* --- Buttons --- */
     .stButton>button {
         background-color: #1f77b4;
         color: white;
+        transition: background-color 0.5s ease, color 0.5s ease;
     }
+
+    /* --- Sliders --- */
     .stSlider label, .stSlider span {
         color: white;
         transition: background-color 0.5s ease, color 0.5s ease;
@@ -49,12 +53,30 @@ if theme == ":red[Dark]":
     .stProgress>div>div>div {
         background-color: white;
         color: #4CAF50;
+        transition: background-color 0.5s ease, color 0.5s ease;
+    }
+
+    /* --- File Uploader & Text Input Containers --- */
+    div[data-testid="stFileUploader"], div[data-testid="stTextInput"] {
+        background-color: #222430;
+        border-radius: 5px;
+        padding: 10px;
+        transition: background-color 0.5s ease, color 0.5s ease;
+    }
+
+    /* --- Inner File Uploader box --- */
+    div[data-testid="stFileUploader"] > div {
+        background-color: #1c1e26 !important;
+        border: 1px solid #3a3f4b !important;
+        color: white;
+        transition: background-color 0.5s ease, color 0.5s ease;
+    }
+    div[data-testid="stFileUploader"] input[type="file"] {
+        color: white !important;
     }
     
     /* Containers (FileUploader, TextInput, etc.) */
-    div[data-testid="stFileUploader"], div[data-testid="stTextInput"], 
-    div[data-testid="stFileUploader"] label, div[data-testid="stTextInput"] label,
-     div[data-testid="stFileUploader"] > div > div, div[data-testid="stTextInput"] > div > div {
+    div[data-testid="stFileUploader"] label, div[data-testid="stTextInput"] label {
         background-color: #222430;
         color: white;
         border-radius: 5px;
@@ -62,11 +84,19 @@ if theme == ":red[Dark]":
         transition: background-color 0.5s ease, color 0.5s ease;
     }
 
-    /* Radio button text (Light/Dark) */
+    /* --- Input text color and background for TextInput --- */
+    div[data-testid="stTextInput"] input {
+        background-color: #1c1e26 !important;
+        color: white !important;
+        border: none;
+        transition: background-color 0.5s ease, color 0.5s ease;
+    }
+
+    /* --- Radio button text --- */
     div[data-testid="stRadio"] label,
     div[data-testid="stRadio"] {
         color: white;
-        transition: color 0.5s ease;
+        transition: background-color 0.5s ease, color 0.5s ease;
     }
     </style>
     """
