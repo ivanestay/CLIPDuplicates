@@ -6,6 +6,9 @@ from PIL import Image
 import torch
 import streamlit as st
 from torchvision import transforms
+from sklearn.metrics.pairwise import cosine_similarity
+from transformers import CLIPModel, CLIPProcessor
+from collections import defaultdict
 
 # --- Load CLIP model and processor with caching ---
 @st.cache_resource
@@ -57,27 +60,16 @@ if theme == ":red[Dark]":
     }
 
     /* --- File Uploader & Text Input Containers --- */
-    div[data-testid="stFileUploader"], div[data-testid="stTextInput"] {
-        background-color: #222430;
+    div[data-testid="stTextInput"] {
+        background-color: #540000;
         border-radius: 5px;
         padding: 10px;
         transition: background-color 0.5s ease, color 0.5s ease;
     }
-
-    /* --- Inner File Uploader box --- */
-    div[data-testid="stFileUploader"] > div {
-        background-color: #1c1e26 !important;
-        border: 1px solid #3a3f4b !important;
-        color: white;
-        transition: background-color 0.5s ease, color 0.5s ease;
-    }
-    div[data-testid="stFileUploader"] input[type="file"] {
-        color: white !important;
-    }
     
     /* Containers (FileUploader, TextInput, etc.) */
-    div[data-testid="stFileUploader"] label, div[data-testid="stTextInput"] label {
-        background-color: #222430;
+    div[data-testid="stTextInput"] label {
+        background-color: #540000;
         color: white;
         border-radius: 5px;
         padding: 10px;
@@ -98,6 +90,44 @@ if theme == ":red[Dark]":
         color: white;
         transition: background-color 0.5s ease, color 0.5s ease;
     }
+    
+    /* Style the File Uploader text */
+    div[data-testid="stFileUploader"] label {
+        color: white;
+        transition: color 0.5s ease;
+    }
+    
+    /* Style the "Browse files" button */
+    [data-testid="stFileUploader"] button {
+        background-color: #ff4b4b !important;
+        color: white !important;
+        border-radius: 6px;
+        padding: 0.5rem 1rem;
+        transition: background-color 0.3s ease, color 0.3s ease;
+        border: none;
+    }
+    
+    /* Move the 'X' button (clear file) slightly to the right */
+    [data-testid="stFileUploader"] section + div button {
+        margin-left: 10px !important;  /* Increase space between filename and X button */
+        transform: translateX(6px);     /* Optional fine-tuning */
+    }
+    
+    [data-testid='stFileUploader'] {
+        width: max-content;
+    }
+    [data-testid='stFileUploader'] section {
+        padding: 0;
+        float: left;
+    }
+    [data-testid='stFileUploader'] section > input + div {
+        display: none;
+    }
+    [data-testid='stFileUploader'] section + div {
+        float: right;
+        padding-top: 0;
+    }
+
     </style>
     """
     st.markdown(dark_theme, unsafe_allow_html=True)
@@ -128,15 +158,35 @@ else:
         color: #4CAF50;
     }
     
+    /* --- File Uploader & Text Input Containers --- */
+    div[data-testid="stTextInput"] {
+        background-color: #ffb6b6;
+        border-radius: 5px;
+        padding: 10px;
+        transition: background-color 0.5s ease, color 0.5s ease;
+    }
+    
     /* Containers (FileUploader, TextInput, etc.) */
-    div[data-testid="stFileUploader"], div[data-testid="stTextInput"], 
-    div[data-testid="stFileUploader"] label, div[data-testid="stTextInput"] label,
-     div[data-testid="stFileUploader"] > div > div, div[data-testid="stTextInput"] > div > div {
-        background-color: #f5f5f5;
+    div[data-testid="stTextInput"] label {
+        background-color: #ffb6b6;
         color: black;
         border-radius: 5px;
         padding: 10px;
         transition: background-color 0.5s ease, color 0.5s ease;
+    }
+
+    /* --- Input text color and background for TextInput --- */
+    div[data-testid="stTextInput"] input {
+        background-color: #ff4b4b !important;
+        color: black !important;
+        border: none;
+        transition: background-color 0.5s ease, color 0.5s ease;
+    }
+    
+    /* File uploader text */
+    div[data-testid="stFileUploader"] label {
+        color: black;
+        transition: color 0.5s ease;
     }
 
     /* Radio button text (Light/Dark) */
@@ -145,6 +195,36 @@ else:
         color: black;
         transition: color 0.5s ease;
     }
+    
+    [data-testid="stFileUploader"] button {
+        background-color: #ff4b4b !important;
+        color: white !important;
+        border-radius: 6px;
+        padding: 0.5rem 1rem;
+        transition: background-color 0.5s ease, color 0.5s ease;
+        border: none;
+    }
+    
+    [data-testid="stFileUploader"] section + div button {
+        margin-left: 10px !important;  /* Increase space between filename and X button */
+        transform: translateX(6px);     /* Optional fine-tuning */
+    }
+    
+    [data-testid='stFileUploader'] {
+        width: max-content;
+    }
+    [data-testid='stFileUploader'] section {
+        padding: 0;
+        float: left;
+    }
+    [data-testid='stFileUploader'] section > input + div {
+        display: none;
+    }
+    [data-testid='stFileUploader'] section + div {
+        float: right;
+        padding-top: 0;
+    }
+
     </style>
     """
     st.markdown(light_theme, unsafe_allow_html=True)
@@ -159,37 +239,24 @@ preprocess = transforms.Compose([
 ])
 
 # --- Streamlit UI ---
-st.title("🔍 CLIP-Based Photo Similarity Finder")
-st.markdown("Upload a reference image and select a folder of photos to compare against it.")
+st.title("🧠 CLIP-Based Duplicate & Similar Image Finder")
+st.markdown("Upload a folder of images and find visually similar or duplicate groups.")
 
-reference_image = st.file_uploader("📌 Upload a Reference Image", type=["jpg", "jpeg", "png"])
 comparison_folder = st.text_input("📁 Enter Folder Path to Photos")
+similarity_threshold = st.slider("🔗 Similarity Threshold (Higher = Stricter)", 0.80, 0.99, 0.90, step=0.01)
 
-top_k = st.slider("🔢 Number of Top Matches to Display", min_value=1, max_value=20, value=5)
-
-if reference_image and comparison_folder:
+if comparison_folder:
     if not os.path.isdir(comparison_folder):
-        st.error("❌ The specified comparison folder path is invalid or does not exist.")
+        st.error("❌ The specified folder path is invalid or does not exist.")
     else:
-        # Load reference image and compute embedding
-        ref_img = Image.open(reference_image).convert("RGB")
-        st.image(ref_img, caption="Reference Image", use_container_width=True)
-
-        ref_inputs = processor(images=ref_img, return_tensors="pt").to(device)
-        with torch.no_grad():
-            ref_embedding = model.get_image_features(**ref_inputs)
-        ref_embedding = torch.nn.functional.normalize(ref_embedding, p=2, dim=1)
-
-        # Gather image paths
         image_paths = [os.path.join(comparison_folder, f)
                        for f in os.listdir(comparison_folder)
                        if f.lower().endswith(('.jpg', '.jpeg', '.png', '.bmp'))]
 
-        if len(image_paths) == 0:
-            st.warning("⚠️ No images found in the specified folder.")
+        if len(image_paths) < 2:
+            st.warning("⚠️ Need at least two images to compare.")
         else:
-            st.markdown("### 🖼️ Top Matches")
-
+            st.info(f"🔄 Loading and embedding {len(image_paths)} images...")
             image_tensors = []
             valid_paths = []
 
@@ -197,9 +264,10 @@ if reference_image and comparison_folder:
             progress_bar = st.progress(0)
             status_text = st.empty()
             start_time = time.time()
-            total_images = len(image_paths)
 
             for idx, path in enumerate(image_paths):
+                loop_start = time.time()
+
                 try:
                     img = Image.open(path).convert("RGB")
                     image_tensors.append(preprocess(img))
@@ -207,32 +275,56 @@ if reference_image and comparison_folder:
                 except Exception as e:
                     st.error(f"Error loading {path}: {e}")
 
-                # Progress update
-                progress_percent = (idx + 1) / total_images
-                progress_bar.progress(progress_percent)
+                progress_bar.progress((idx + 1) / len(image_paths))
+
+                # Estimate time remaining
                 elapsed = time.time() - start_time
-                if idx > 0:
-                    avg_time = elapsed / (idx + 1)
-                    eta = avg_time * (total_images - idx - 1)
-                    status_text.text(f"Progress: {progress_percent:.0%} | Estimated time left: {int(eta//60)}m {int(eta%60)}s")
+                avg_time_per_image = elapsed / (idx + 1)
+                images_left = len(image_paths) - (idx + 1)
+                eta = avg_time_per_image * images_left
+                mins, secs = divmod(int(eta), 60)
 
-            if len(image_tensors) == 0:
-                st.warning("⚠️ No valid images could be loaded.")
+                time_color = "white" if theme == ":red[Dark]" else "black"
+                status_text.markdown(
+                    f"<p style='color:{time_color}; font-weight:bold;'>Estimated time remaining: {mins:02d}:{secs:02d}</p>",
+                    unsafe_allow_html=True
+                )
+
+            batch_tensor = torch.stack(image_tensors).to(device)
+            with torch.no_grad():
+                image_embeddings = model.get_image_features(pixel_values=batch_tensor)
+            image_embeddings = torch.nn.functional.normalize(image_embeddings, p=2, dim=1)
+            similarity_matrix = cosine_similarity(image_embeddings.cpu().numpy())
+
+            # --- Grouping similar images ---
+            st.success("✅ Similarity computed. Grouping similar images...")
+            grouped = defaultdict(list)
+            visited = set()
+            N = len(valid_paths)
+
+            for i in range(N):
+                if i in visited:
+                    continue
+                group = [i]
+                for j in range(i + 1, N):
+                    if j not in visited and similarity_matrix[i][j] >= similarity_threshold:
+                        group.append(j)
+                if len(group) > 1:
+                    for idx in group:
+                        visited.add(idx)
+                    grouped[i] = group
+
+            if not grouped:
+                st.warning("😕 No visually similar image groups found above the threshold.")
             else:
-                # Stack and move to device
-                batch_tensor = torch.stack(image_tensors).to(device)
-
-                with torch.no_grad():
-                    image_embeddings = model.get_image_features(pixel_values=batch_tensor)
-                image_embeddings = torch.nn.functional.normalize(image_embeddings, p=2, dim=1)
-
-                # Compute similarity in batch
-                similarities = (ref_embedding @ image_embeddings.T).squeeze()
-                results = list(zip(valid_paths, similarities.tolist()))
-
-                # Show top results
-                results.sort(key=lambda x: x[1], reverse=True)
-                for img_path, score in results[:top_k]:
-                    st.image(Image.open(img_path), caption=f"{os.path.basename(img_path)} (Similarity: {score:.2f})", use_container_width=True)
+                st.subheader("🔍 Similar Image Groups")
+                for group_id, indices in grouped.items():
+                    with st.expander(f"Group {group_id + 1} ({len(indices)} images)"):
+                        cols = st.columns(min(len(indices), 5))
+                        for col, idx in zip(cols * (len(indices) // len(cols) + 1), indices):
+                            with col:
+                                st.image(Image.open(valid_paths[idx]),
+                                         caption=os.path.basename(valid_paths[idx]),
+                                         use_container_width=True)
 else:
-    st.info("📥 Please upload a reference image and provide a valid folder path.")
+    st.info("📥 Please enter a valid folder path to begin.")
