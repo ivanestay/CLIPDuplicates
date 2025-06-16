@@ -243,9 +243,6 @@ preprocess = transforms.Compose([
 st.title("🧠 CLIP-Based Duplicate & Similar Image Finder")
 st.markdown("Upload a folder of images and find visually similar or duplicate groups.")
 
-comparison_folder = st.text_input("📁 Enter Folder Path to Photos")
-similarity_threshold = st.slider("🔗 Similarity Threshold (Higher = Stricter)", 0.80, 0.99, 0.90, step=0.01)
-
 # --- File Uploader ---
 uploaded_zip = st.file_uploader("📦 Upload a ZIP of Images", type=["zip"])
 similarity_threshold = st.slider("🔗 Similarity Threshold (Higher = Stricter)", 0.80, 0.99, 0.90, step=0.01)
