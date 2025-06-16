@@ -1,7 +1,6 @@
 import os
 import time
 import math
-from transformers import CLIPProcessor, CLIPModel
 from PIL import Image
 import torch
 import streamlit as st
@@ -245,13 +244,24 @@ st.markdown("Upload a folder of images and find visually similar or duplicate gr
 comparison_folder = st.text_input("📁 Enter Folder Path to Photos")
 similarity_threshold = st.slider("🔗 Similarity Threshold (Higher = Stricter)", 0.80, 0.99, 0.90, step=0.01)
 
-if comparison_folder:
-    if not os.path.isdir(comparison_folder):
-        st.error("❌ The specified folder path is invalid or does not exist.")
-    else:
-        image_paths = [os.path.join(comparison_folder, f)
-                       for f in os.listdir(comparison_folder)
-                       if f.lower().endswith(('.jpg', '.jpeg', '.png', '.bmp'))]
+# --- File Uploader ---
+uploaded_zip = st.file_uploader("📦 Upload a ZIP of Images", type=["zip"])
+similarity_threshold = st.slider("🔗 Similarity Threshold (Higher = Stricter)", 0.80, 0.99, 0.90, step=0.01)
+
+if uploaded_zip:
+    with tempfile.TemporaryDirectory() as tmpdir:
+        zip_path = os.path.join(tmpdir, "images.zip")
+        with open(zip_path, "wb") as f:
+            f.write(uploaded_zip.read())
+
+        with zipfile.ZipFile(zip_path, "r") as zip_ref:
+            zip_ref.extractall(tmpdir)
+
+        image_paths = [
+            os.path.join(tmpdir, f)
+            for f in os.listdir(tmpdir)
+            if f.lower().endswith(('.jpg', '.jpeg', '.png', '.bmp'))
+        ]
 
         if len(image_paths) < 2:
             st.warning("⚠️ Need at least two images to compare.")
@@ -260,14 +270,11 @@ if comparison_folder:
             image_tensors = []
             valid_paths = []
 
-            # Progress tracking
             progress_bar = st.progress(0)
             status_text = st.empty()
             start_time = time.time()
 
             for idx, path in enumerate(image_paths):
-                loop_start = time.time()
-
                 try:
                     img = Image.open(path).convert("RGB")
                     image_tensors.append(preprocess(img))
@@ -276,17 +283,12 @@ if comparison_folder:
                     st.error(f"Error loading {path}: {e}")
 
                 progress_bar.progress((idx + 1) / len(image_paths))
-
-                # Estimate time remaining
                 elapsed = time.time() - start_time
-                avg_time_per_image = elapsed / (idx + 1)
-                images_left = len(image_paths) - (idx + 1)
-                eta = avg_time_per_image * images_left
+                avg_time = elapsed / (idx + 1)
+                eta = avg_time * (len(image_paths) - (idx + 1))
                 mins, secs = divmod(int(eta), 60)
-
-                time_color = "white" if theme == ":red[Dark]" else "black"
                 status_text.markdown(
-                    f"<p style='color:{time_color}; font-weight:bold;'>Estimated time remaining: {mins:02d}:{secs:02d}</p>",
+                    f"<p style='color:white if theme == \":red[Dark]\" else black;'>Estimated time remaining: {mins:02d}:{secs:02d}</p>",
                     unsafe_allow_html=True
                 )
 
@@ -296,7 +298,6 @@ if comparison_folder:
             image_embeddings = torch.nn.functional.normalize(image_embeddings, p=2, dim=1)
             similarity_matrix = cosine_similarity(image_embeddings.cpu().numpy())
 
-            # --- Grouping similar images ---
             st.success("✅ Similarity computed. Grouping similar images...")
             grouped = defaultdict(list)
             visited = set()
@@ -327,4 +328,4 @@ if comparison_folder:
                                          caption=os.path.basename(valid_paths[idx]),
                                          use_container_width=True)
 else:
-    st.info("📥 Please enter a valid folder path to begin.")
+    st.info("📥 Please upload a ZIP file containing at least two images.")
