@@ -1,6 +1,7 @@
-streamlit
-torch
-torchvision
-transformers
-scikit-learn
-pillow
+streamlit~=1.45.1
+torch~=2.7.1
+torchvision~=0.22.1
+transformers~=4.52.4
+scikit-learn~=1.7.0
+pillow~=11.1.0
+gdown~=5.2.0

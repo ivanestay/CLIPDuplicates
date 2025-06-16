@@ -10,6 +10,7 @@ from torchvision import transforms
 from sklearn.metrics.pairwise import cosine_similarity
 from transformers import CLIPModel, CLIPProcessor
 from collections import defaultdict
+import gdown
 
 # --- Load CLIP model and processor with caching ---
 @st.cache_resource
@@ -241,34 +242,45 @@ preprocess = transforms.Compose([
 
 # --- Streamlit UI ---
 st.title("🧠 CLIP-Based Duplicate & Similar Image Finder")
-st.markdown("Upload a folder of images and find visually similar or duplicate groups.")
+st.markdown("Paste a public Google Drive link to a ZIP of images, download, extract, and find similar or duplicate images.")
 
-# --- File Uploader ---
-uploaded_zip = st.file_uploader("📦 Upload a ZIP of Images", type=["zip"])
+drive_url = st.text_input("Paste the public Google Drive link to your ZIP file:")
 similarity_threshold = st.slider("🔗 Similarity Threshold (Higher = Stricter)", 0.80, 0.99, 0.90, step=0.01)
 
-if uploaded_zip:
-    with tempfile.TemporaryDirectory() as tmpdir:
-        zip_path = os.path.join(tmpdir, "images.zip")
-        with open(zip_path, "wb") as f:
-            f.write(uploaded_zip.read())
+if st.button("Download and Process ZIP") and drive_url:
+    with st.spinner("Downloading ZIP from Google Drive..."):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            zip_path = os.path.join(tmpdir, "images.zip")
+            try:
+                gdown.download(drive_url, zip_path, quiet=False, fuzzy=True)
+            except Exception as e:
+                st.error(f"Error downloading from Google Drive: {e}")
+                st.stop()
 
-        with zipfile.ZipFile(zip_path, "r") as zip_ref:
-            zip_ref.extractall(tmpdir)
+            # Extract ZIP
+            try:
+                with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+                    zip_ref.extractall(tmpdir)
+                st.success("ZIP extracted successfully!")
+            except Exception as e:
+                st.error(f"Failed to extract ZIP: {e}")
+                st.stop()
 
-        image_paths = [
-            os.path.join(tmpdir, f)
-            for f in os.listdir(tmpdir)
-            if f.lower().endswith(('.jpg', '.jpeg', '.png', '.bmp'))
-        ]
+            # Collect image paths
+            image_paths = []
+            for root, dirs, files in os.walk(tmpdir):
+                for file in files:
+                    if file.lower().endswith((".png", ".jpg", ".jpeg", ".bmp")):
+                        image_paths.append(os.path.join(root, file))
 
-        if len(image_paths) < 2:
-            st.warning("⚠️ Need at least two images to compare.")
-        else:
-            st.info(f"🔄 Loading and embedding {len(image_paths)} images...")
+            if len(image_paths) < 2:
+                st.warning("⚠️ Need at least two images to compare.")
+                st.stop()
+
+            st.info(f"Found {len(image_paths)} images. Computing embeddings...")
+
             image_tensors = []
             valid_paths = []
-
             progress_bar = st.progress(0)
             status_text = st.empty()
             start_time = time.time()
@@ -286,10 +298,7 @@ if uploaded_zip:
                 avg_time = elapsed / (idx + 1)
                 eta = avg_time * (len(image_paths) - (idx + 1))
                 mins, secs = divmod(int(eta), 60)
-                status_text.markdown(
-                    f"<p style='color:white if theme == \":red[Dark]\" else black;'>Estimated time remaining: {mins:02d}:{secs:02d}</p>",
-                    unsafe_allow_html=True
-                )
+                status_text.markdown(f"Estimated time remaining: {mins:02d}:{secs:02d}")
 
             batch_tensor = torch.stack(image_tensors).to(device)
             with torch.no_grad():
@@ -298,6 +307,7 @@ if uploaded_zip:
             similarity_matrix = cosine_similarity(image_embeddings.cpu().numpy())
 
             st.success("✅ Similarity computed. Grouping similar images...")
+
             grouped = defaultdict(list)
             visited = set()
             N = len(valid_paths)
@@ -327,4 +337,4 @@ if uploaded_zip:
                                          caption=os.path.basename(valid_paths[idx]),
                                          use_container_width=True)
 else:
-    st.info("📥 Please upload a ZIP file containing at least two images.")
+    st.info("📥 Paste a public Google Drive link to a ZIP file and click 'Download and Process ZIP'.")
